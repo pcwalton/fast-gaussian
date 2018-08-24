@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html class="h-100">
+<head>
+    <title>Gaussian Kawase demo</title>
+    <link rel="stylesheet"
+        href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.2/css/bootstrap.min.css"
+        integrity="sha384-Smlep5jCw/wG7hdkwQ/Z5nLIefveQRIY9nfy6xoR1uRYBtpZgI6339F5dgvm/e9B"
+        crossorigin="anonymous">
+    <script type="text/javascript" src="main.ts"></script>
+</head>
+<body class="d-flex flex-column w-100 h-100">
+    <main class="d-flex flex-row flex-fill">
+        <div id="canvas-test-container" class="d-flex flex-fill flex-column px-3 py-2">
+            <h3>Test</h3>
+            <canvas id="canvas-test"></canvas>
+        </div>
+        <div id="canvas-ref-container" class="d-flex flex-fill flex-column px-3 py-2 border-left">
+            <h3>Reference</h3>
+            <canvas id="canvas-ref"></canvas>
+        </div>
+    </main>
+    <footer class="d-flex flex-row px-3 py-2 border-top">
+        <div class="flex-fill">SSIM: <span id="ssim">&mdash;</span></div>
+        <form class="form-inline w-auto">
+            <input type="range" class="form-control-range custom-range flex-fill w-auto mr-3" id="radius-range">
+            <input type="text" class="custom-control mr-2 px-1 text-right" style="width: 3em" id="radius-text" value="35">
+            <div>px</div>
+        </form>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "devDependencies": {
+    "glslify-bundle": "^5.0.0",
+    "typescript": "^3.0.1"
+  },
+  "dependencies": {
+    "parcel-plugin-glsl": "^0.1.0",
+    "ssim.js": "^3.0.0"
+  }
+}
