@@ -5,7 +5,6 @@ import {ssim} from "ssim.js";
 import SHADER_SOURCE_VERTEX from "./vertex.vs.glsl";
 import SHADER_SOURCE_FRAGMENT_BLIT from "./blit.fs.glsl";
 import SHADER_SOURCE_FRAGMENT_GAUSS_KAWASE from "./gauss-kawase.fs.glsl";
-import SHADER_SOURCE_FRAGMENT_UP from "./up.fs.glsl";
 
 import IMAGE_PATH from "./fabio.jpg";
 
@@ -16,9 +15,6 @@ const VERTEX_DATA: Int8Array = new Int8Array([
      1,  1,  1,  1,
 ]);
 
-const RADIUS: number = 74;
-const PASSES: number = 6;
-
 document.addEventListener('DOMContentLoaded', () => main());
 
 function main(): void {
@@ -28,11 +24,15 @@ function main(): void {
 }
 
 class App {
+    private radius: number;
+
     private image: HTMLImageElement;
 
     private canvasTest: HTMLCanvasElement;
     private canvasReference: HTMLCanvasElement;
     private ssimLabel: HTMLElement;
+    private radiusSliderInput: HTMLInputElement;
+    private radiusTextInput: HTMLInputElement;
 
     private gl: WebGLRenderingContext;
     private context2D: CanvasRenderingContext2D;
@@ -40,16 +40,27 @@ class App {
     private vertexBuffer: WebGLBuffer;
     private shaderProgramBlit: ShaderProgram;
     private shaderProgramGaussKawase: ShaderProgram;
-    private shaderProgramUp: ShaderProgram;
     private imageTexture: WebGLTexture;
     private renderTargets: RenderTarget[];
 
     constructor(image: HTMLImageElement) {
         this.image = image;
 
-        this.canvasTest = unwrap(document.getElementById('canvas-test')) as HTMLCanvasElement;
-        this.canvasReference = unwrap(document.getElementById('canvas-ref')) as HTMLCanvasElement;
+        this.canvasTest = staticCast(document.getElementById('canvas-test'), HTMLCanvasElement);
+        this.canvasReference = staticCast(document.getElementById('canvas-ref'),
+                                           HTMLCanvasElement);
         this.ssimLabel = unwrap(document.getElementById('ssim'));
+        this.radiusSliderInput = staticCast(document.getElementById('radius-slider'),
+                                             HTMLInputElement);
+        this.radiusTextInput = staticCast(document.getElementById('radius-text'),
+                                           HTMLInputElement);
+
+        this.radius = parseFloat(this.radiusTextInput.value);
+
+        this.radiusSliderInput.addEventListener('change',
+                                                event => this.updateRadius(event),
+                                                false);
+        this.radiusTextInput.addEventListener('change', event => this.updateRadius(event), false);
 
         resizeCanvas(this.canvasTest, image);
         resizeCanvas(this.canvasReference, image);
@@ -67,7 +78,6 @@ class App {
         this.shaderProgramGaussKawase = new ShaderProgram(gl,
                                                           SHADER_SOURCE_FRAGMENT_GAUSS_KAWASE,
                                                           vertexBuffer);
-        this.shaderProgramUp = new ShaderProgram(gl, SHADER_SOURCE_FRAGMENT_UP, vertexBuffer);
 
         const imageTexture = unwrap(gl.createTexture());
         this.imageTexture = imageTexture;
@@ -89,14 +99,23 @@ class App {
         this.calculateSimilarity();
     }
 
+    private updateRadius(event: Event): void {
+        this.radius = parseFloat(staticCast(event.target, HTMLInputElement).value);
+        this.radiusSliderInput.value = "" + this.radius;
+        this.radiusTextInput.value = "" + this.radius;
+        this.update();
+    }
+
     private updateTest(): void {
         const gl = this.gl;
+
+        const passCount = bestPassCount(this.radius);
 
         // Downsampling
         let width = this.canvasTest.width, height = this.canvasTest.height;
         let srcTexture = this.imageTexture;
         let pass = 0;
-        while (pass < PASSES) {
+        while (pass < passCount) {
             const newWidth = width / 2, newHeight = height / 2;
             const renderTarget = this.renderTargets[pass % 2];
             renderTarget.resize(gl, newWidth, newHeight);
@@ -117,38 +136,65 @@ class App {
             pass++;
         }
 
+        const stepRadius = bestStepRadius(passCount, this.radius);
+        console.log("passes " + passCount + " step radius " + stepRadius);
+
         // Intermediate upsampling passes
-        while (pass < PASSES * 2 - 1) {
+        //while (pass < passCount * 2 - 1) {
             const newWidth = width * 2, newHeight = height * 2;
 
             const renderTarget = this.renderTargets[pass % 2];
             renderTarget.resize(gl, newWidth, newHeight);
             gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
 
-            this.drawQuad(gl,
-                          /*pass == PASSES ?*/ this.shaderProgramGaussKawase /*: this.shaderProgramBlit*/,
-                          newWidth,
-                          newHeight,
-                          width,
-                          height,
-                          srcTexture);
+            this.drawBlur(gl, stepRadius, newWidth, newHeight, width, height, srcTexture);
 
             srcTexture = renderTarget.texture;
             width = newWidth;
             height = newHeight;
 
             pass++;
-        }
+        //}
 
         // Final upsampling pass
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         this.drawQuad(gl,
-                      this.shaderProgramGaussKawase,
+                      //stepRadius,
+                      this.shaderProgramBlit,
                       this.canvasTest.width,
                       this.canvasTest.height,
                       width,
                       height,
                       srcTexture);
+    }
+
+    private drawBlur(gl: WebGLRenderingContext,
+                     radius: number,
+                     destWidth: number,
+                     destHeight: number,
+                     srcWidth: number,
+                     srcHeight: number,
+                     srcTexture: WebGLTexture):
+                     void {
+        const coeffs = [
+            gauss2D(radius, 0.5, 0.5),
+            gauss2D(radius, 0.5, 1.5),
+            gauss2D(radius, 1.5, 1.5),
+            gauss2D(radius, 2.5, 0.5),
+            gauss2D(radius, 2.5, 1.5),
+            gauss2D(radius, 2.5, 2.5),
+        ];
+
+        const coeffSum = 4.0 * (coeffs[0] + 2.0 * coeffs[1] + coeffs[2] +
+                                2.0 * coeffs[3] + 2.0 * coeffs[4] + coeffs[5]);
+        const coeffsInner = coeffs.slice(0, 3).map(x => x / coeffSum);
+        const coeffsOuter = coeffs.slice(3, 6).map(x => x / coeffSum);
+
+        const shaderProgram = this.shaderProgramGaussKawase;
+        gl.useProgram(shaderProgram.program);
+        gl.uniform3fv(shaderProgram.uniformCoeffsInner, coeffsInner);
+        gl.uniform3fv(shaderProgram.uniformCoeffsOuter, coeffsOuter);
+        this.drawQuad(gl, shaderProgram, destWidth, destHeight, srcWidth, srcHeight, srcTexture);
     }
 
     private drawQuad(gl: WebGLRenderingContext,
@@ -175,7 +221,7 @@ class App {
         const canvas = this.canvasReference, context = this.context2D;
         context.fillStyle = 'black';
         context.fillRect(0, 0, canvas.width, canvas.height);
-        (context as any).filter = "blur(" + RADIUS + "px)";
+        (context as any).filter = "blur(" + this.radius + "px)";
         context.drawImage(this.image, 0, 0);
         (context as any).filter = null;
     }
@@ -239,6 +285,8 @@ class ShaderProgram {
     program: WebGLProgram;
     uniformTexture: WebGLUniformLocation;
     uniformSizeRecip: WebGLUniformLocation | null;
+    uniformCoeffsInner: WebGLUniformLocation | null;
+    uniformCoeffsOuter: WebGLUniformLocation | null;
 
     constructor(gl: WebGLRenderingContext, fragmentShader: string, buffer: WebGLBuffer) {
         const shaderVertex = createShader(gl, 'vertex', SHADER_SOURCE_VERTEX);
@@ -257,6 +305,8 @@ class ShaderProgram {
         const attribTexCoord = gl.getAttribLocation(program, "aTexCoord");
         this.uniformTexture = unwrap(gl.getUniformLocation(program, "uTexture"));
         this.uniformSizeRecip = gl.getUniformLocation(program, "uSizeRecip");
+        this.uniformCoeffsInner = gl.getUniformLocation(program, "uCoeffsInner");
+        this.uniformCoeffsOuter = gl.getUniformLocation(program, "uCoeffsOuter");
 
         gl.vertexAttribPointer(attribVertexPosition, 2, gl.BYTE, false, 4, 0);
         gl.vertexAttribPointer(attribTexCoord, 2, gl.BYTE, false, 4, 2);
@@ -281,6 +331,51 @@ function resizeCanvas(canvas: HTMLCanvasElement, image: HTMLImageElement): void 
     canvas.style.height = image.height / window.devicePixelRatio + "px";
     canvas.width = image.width;
     canvas.height = image.height;
+}
+
+function bestPassCount(radius: number): number {
+    /*
+    if (radius <= 3.0)
+        return 1;
+    if (radius <= 6.0)
+        return 2;
+    if (radius <= 13.0)
+        return 3;
+    if (radius <= 27.0)
+        return 4;
+    if (radius <= 55.0)
+        return 5;
+    return 6;
+    */
+    if (radius <= 4.0)
+        return 1;
+    if (radius <= 8.0)
+        return 2;
+    if (radius <= 16.0)
+        return 3;
+    if (radius <= 32.0)
+        return 4;
+    if (radius <= 64.0)
+        return 5;
+    return 6;
+}
+
+function bestStepRadius(passes: number, radius: number): number {
+    /*let n = [1, 5, 21, 85, 341, 1365][passes - 1];
+    return Math.sqrt(n) * radius / n;*/
+    return radius / Math.pow(2, passes - 1);
+}
+
+function gauss2D(radius: number, x: number, y: number): number {
+    const sigma = radius * 0.5;
+    const invSigma2Sq = 1.0 / (2.0 * sigma * sigma);
+    return invSigma2Sq / Math.PI * Math.exp(-(x * x + y * y) * invSigma2Sq);
+}
+
+function staticCast<T>(value: any, constructor: { new(...args: any[]): T }): T {
+    if (!(value instanceof constructor))
+        throw new Error("Invalid dynamic cast");
+    return value;
 }
 
 function unwrap<T>(value: T | null | undefined): T {

@@ -22,8 +22,8 @@
     <footer class="d-flex flex-row px-3 py-2 border-top">
         <div class="flex-fill">SSIM: <span id="ssim">&mdash;</span></div>
         <form class="form-inline w-auto">
-            <input type="range" class="form-control-range custom-range flex-fill w-auto mr-3" id="radius-range">
-            <input type="text" class="custom-control mr-2 px-1 text-right" style="width: 3em" id="radius-text" value="35">
+            <input type="range" class="form-control-range custom-range flex-fill w-auto mr-3" min=1 max=100 value=35 id="radius-slider">
+            <input type="number" class="custom-control mr-2 px-1 text-right" style="width: 3em" id="radius-text" value="35">
             <div>px</div>
         </form>
     </footer>
