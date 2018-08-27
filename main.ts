@@ -109,58 +109,104 @@ class App {
     private updateTest(): void {
         const gl = this.gl;
 
-        const passCount = bestPassCount(this.radius);
+        //let passCount = bestPassCount(this.radius);
+        /*const runTestPass = passCount > 3;
+        if (runTestPass) {
+            console.log("*** 4 passes");
+            passCount = 3;
+        }*/
 
         // Downsampling
+        let radiusLeft = this.radius;
+        let totalRadius = 0.0, totalScale = 1.0;
+        let schedule: ScheduleEntry[] = [];
+
+        //const targetWidth = this.canvasTest.width / this.radius * 2;
         let width = this.canvasTest.width, height = this.canvasTest.height;
         let srcTexture = this.imageTexture;
         let pass = 0;
-        while (pass < passCount) {
-            const newWidth = width / 2, newHeight = height / 2;
+        while (radiusLeft > 0.001) {
+            // sqrt((stepRadius*scaleFactor*totalScale)^2) == radiusLeft
+            // stepRadius*scaleFactor*totalScale == radiusLeft
+            let stepRadius = 2.0;
+            let scaleFactor = Math.min(radiusLeft / (totalScale * stepRadius), 2.0);
+            /*if (scaleFactor < 1.0) {
+                // Hold scale factor constant; adjust radius.
+                scaleFactor = 1.0;
+                stepRadius = radiusLeft / (scaleFactor * totalScale);
+            }*/
+
+            const scheduleEntry = {
+                radius: stepRadius,
+                width: Math.round(width / scaleFactor),
+                height: Math.round(height / scaleFactor),
+            };
+            schedule.push(scheduleEntry);
+
             const renderTarget = this.renderTargets[pass % 2];
-            renderTarget.resize(gl, newWidth, newHeight);
+            renderTarget.resize(gl, scheduleEntry.width, scheduleEntry.height);
             gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
+
+            totalScale *= scaleFactor;
+            totalRadius += scheduleEntry.radius * totalScale;
+            radiusLeft -= scheduleEntry.radius * totalScale;
+            console.log("... pass=", pass, "scheduleEntry=", scheduleEntry,
+                        "radiusLeft=", radiusLeft, "scaleFactor=", scaleFactor);
 
             this.drawQuad(gl,
                           this.shaderProgramBlit,
-                          newWidth,
-                          newHeight,
+                          scheduleEntry.width,
+                          scheduleEntry.height,
                           width,
                           height,
                           srcTexture);
 
             srcTexture = renderTarget.texture;
-            width = newWidth;
-            height = newHeight;
+            width = scheduleEntry.width;
+            height = scheduleEntry.height;
 
             pass++;
         }
 
-        const stepRadius = bestStepRadius(passCount, this.radius);
-        console.log("passes " + passCount + " step radius " + stepRadius);
+        const passCount = pass;
+
+        //schedule.reverse();
+
+        console.log("passes " + passCount + " radius " + this.radius);
 
         // Intermediate upsampling passes
-        //while (pass < passCount * 2 - 1) {
-            const newWidth = width * 2, newHeight = height * 2;
+        const penultPass = pass + passCount - 1;
+        while (pass < penultPass) {
+            const scheduleEntry = unwrap(schedule.pop());
 
             const renderTarget = this.renderTargets[pass % 2];
-            renderTarget.resize(gl, newWidth, newHeight);
+            renderTarget.resize(gl, scheduleEntry.width, scheduleEntry.height);
+            console.log("upsample: scheduleEntry=", scheduleEntry);
             gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
 
-            this.drawBlur(gl, stepRadius, newWidth, newHeight, width, height, srcTexture);
+            this.drawBlur(gl,
+                          scheduleEntry.radius,
+                          scheduleEntry.width,
+                          scheduleEntry.height,
+                          width,
+                          height,
+                          srcTexture);
 
             srcTexture = renderTarget.texture;
-            width = newWidth;
-            height = newHeight;
+            width = scheduleEntry.width;
+            height = scheduleEntry.height;
 
             pass++;
-        //}
+        }
+
+        const scheduleEntry = unwrap(schedule.pop());
+        console.log("upsample (final): scheduleEntry=", scheduleEntry);
+        console.log("... totalRadius=", Math.sqrt(totalRadius));
 
         // Final upsampling pass
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        this.drawQuad(gl,
-                      //stepRadius,
-                      this.shaderProgramBlit,
+        this.drawBlur(gl,
+                      scheduleEntry.radius,
                       this.canvasTest.width,
                       this.canvasTest.height,
                       width,
@@ -176,6 +222,7 @@ class App {
                      srcHeight: number,
                      srcTexture: WebGLTexture):
                      void {
+        // TODO(pcwalton): This assumes 2x upsampling/downsampling...
         const coeffs = [
             gauss2D(radius, 0.5, 0.5),
             gauss2D(radius, 0.5, 1.5),
@@ -189,6 +236,8 @@ class App {
                                 2.0 * coeffs[3] + 2.0 * coeffs[4] + coeffs[5]);
         const coeffsInner = coeffs.slice(0, 3).map(x => x / coeffSum);
         const coeffsOuter = coeffs.slice(3, 6).map(x => x / coeffSum);
+        //console.log("coeffsInner", coeffsInner);
+        //console.log("coeffsOuter", coeffsOuter);
 
         const shaderProgram = this.shaderProgramGaussKawase;
         gl.useProgram(shaderProgram.program);
@@ -221,7 +270,7 @@ class App {
         const canvas = this.canvasReference, context = this.context2D;
         context.fillStyle = 'black';
         context.fillRect(0, 0, canvas.width, canvas.height);
-        (context as any).filter = "blur(" + this.radius + "px)";
+        (context as any).filter = "blur(" + (this.radius / 2) + "px)";
         context.drawImage(this.image, 0, 0);
         (context as any).filter = null;
     }
@@ -347,6 +396,23 @@ function bestPassCount(radius: number): number {
         return 5;
     return 6;
     */
+   /*
+    if (radius <= 4.0 - 1.0)
+        return 1;
+    if (radius <= 8.0 - 2.0)
+        return 2;
+    if (radius <= 16.0 - 4.0)
+        return 3;
+    if (radius <= 32.0 - 8.0)
+        return 4;
+    if (radius <= 64.0 - 16.0)
+        return 5;
+    return 6;
+    */
+    /*for (let passes = 0; passes < 6; passes++) {
+        if (bestStepRadius(passes, radius) <= 2.5)
+            return passes;
+    }*/
     if (radius <= 4.0)
         return 1;
     if (radius <= 8.0)
@@ -361,9 +427,9 @@ function bestPassCount(radius: number): number {
 }
 
 function bestStepRadius(passes: number, radius: number): number {
-    /*let n = [1, 5, 21, 85, 341, 1365][passes - 1];
-    return Math.sqrt(n) * radius / n;*/
-    return radius / Math.pow(2, passes - 1);
+    let n = [1, 5, 21, 85, 341, 1365][passes];
+    return Math.sqrt(n) * radius / n;
+    //return radius / Math.pow(2, passes - 1);
 }
 
 function gauss2D(radius: number, x: number, y: number): number {
@@ -388,3 +454,9 @@ function assert(cond: boolean, message?: string): void {
     if (!cond)
         throw new Error(message != null ? message : "Assertion failed");
 }
+
+type ScheduleEntry = {
+    radius: number;
+    width: number;
+    height: number;
+};
