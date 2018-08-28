@@ -65,7 +65,7 @@ class App {
         resizeCanvas(this.canvasTest, image);
         resizeCanvas(this.canvasReference, image);
 
-        const gl = unwrap(this.canvasTest.getContext('webgl'));
+        const gl = unwrap(this.canvasTest.getContext('webgl', {antialias: false}));
         this.gl = gl;
         this.context2D = unwrap(this.canvasReference.getContext('2d'));
 
@@ -178,23 +178,23 @@ class App {
         const penultPass = pass + passCount - 1;
         while (pass < penultPass) {
             const scheduleEntry = unwrap(schedule.pop());
+            const nextScheduleEntry = schedule[schedule.length - 1];
 
             const renderTarget = this.renderTargets[pass % 2];
-            renderTarget.resize(gl, scheduleEntry.width, scheduleEntry.height);
-            console.log("upsample: scheduleEntry=", scheduleEntry);
+            renderTarget.resize(gl, nextScheduleEntry.width, nextScheduleEntry.height);
+            console.log("upsample: scheduleEntry=", scheduleEntry, "nextScheduleEntry=",
+                        nextScheduleEntry);
             gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
 
             this.drawBlur(gl,
                           scheduleEntry.radius,
+                          nextScheduleEntry.width,
+                          nextScheduleEntry.height,
                           scheduleEntry.width,
                           scheduleEntry.height,
-                          width,
-                          height,
                           srcTexture);
 
             srcTexture = renderTarget.texture;
-            width = scheduleEntry.width;
-            height = scheduleEntry.height;
 
             pass++;
         }
@@ -209,8 +209,8 @@ class App {
                       scheduleEntry.radius,
                       this.canvasTest.width,
                       this.canvasTest.height,
-                      width,
-                      height,
+                      scheduleEntry.width,
+                      scheduleEntry.height,
                       srcTexture);
     }
 
@@ -222,6 +222,7 @@ class App {
                      srcHeight: number,
                      srcTexture: WebGLTexture):
                      void {
+        console.log("drawBlur(", radius, destWidth, destHeight, srcWidth, srcHeight, ")");
         // TODO(pcwalton): This assumes 2x upsampling/downsampling...
         const coeffs = [
             gauss2D(radius, 0.5, 0.5),
@@ -240,6 +241,7 @@ class App {
         //console.log("coeffsOuter", coeffsOuter);
 
         const shaderProgram = this.shaderProgramGaussKawase;
+        //const shaderProgram = this.shaderProgramBlit;
         gl.useProgram(shaderProgram.program);
         gl.uniform3fv(shaderProgram.uniformCoeffsInner, coeffsInner);
         gl.uniform3fv(shaderProgram.uniformCoeffsOuter, coeffsOuter);
@@ -262,7 +264,8 @@ class App {
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, srcTexture);
         gl.uniform1i(shaderProgram.uniformTexture, 0);
-        gl.uniform2f(shaderProgram.uniformSizeRecip, 1.0 / srcWidth, 1.0 / srcHeight);
+        gl.uniform2f(shaderProgram.uniformDestSizeRecip, 1.0 / destWidth, 1.0 / destHeight);
+        gl.uniform2f(shaderProgram.uniformSrcSizeRecip, 1.0 / srcWidth, 1.0 / srcHeight);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
@@ -333,7 +336,8 @@ class RenderTarget {
 class ShaderProgram {
     program: WebGLProgram;
     uniformTexture: WebGLUniformLocation;
-    uniformSizeRecip: WebGLUniformLocation | null;
+    uniformDestSizeRecip: WebGLUniformLocation | null;
+    uniformSrcSizeRecip: WebGLUniformLocation | null;
     uniformCoeffsInner: WebGLUniformLocation | null;
     uniformCoeffsOuter: WebGLUniformLocation | null;
 
@@ -353,7 +357,8 @@ class ShaderProgram {
         const attribVertexPosition = gl.getAttribLocation(program, "aPosition");
         const attribTexCoord = gl.getAttribLocation(program, "aTexCoord");
         this.uniformTexture = unwrap(gl.getUniformLocation(program, "uTexture"));
-        this.uniformSizeRecip = gl.getUniformLocation(program, "uSizeRecip");
+        this.uniformDestSizeRecip = gl.getUniformLocation(program, "uDestSizeRecip");
+        this.uniformSrcSizeRecip = gl.getUniformLocation(program, "uSrcSizeRecip");
         this.uniformCoeffsInner = gl.getUniformLocation(program, "uCoeffsInner");
         this.uniformCoeffsOuter = gl.getUniformLocation(program, "uCoeffsOuter");
 
@@ -380,56 +385,6 @@ function resizeCanvas(canvas: HTMLCanvasElement, image: HTMLImageElement): void 
     canvas.style.height = image.height / window.devicePixelRatio + "px";
     canvas.width = image.width;
     canvas.height = image.height;
-}
-
-function bestPassCount(radius: number): number {
-    /*
-    if (radius <= 3.0)
-        return 1;
-    if (radius <= 6.0)
-        return 2;
-    if (radius <= 13.0)
-        return 3;
-    if (radius <= 27.0)
-        return 4;
-    if (radius <= 55.0)
-        return 5;
-    return 6;
-    */
-   /*
-    if (radius <= 4.0 - 1.0)
-        return 1;
-    if (radius <= 8.0 - 2.0)
-        return 2;
-    if (radius <= 16.0 - 4.0)
-        return 3;
-    if (radius <= 32.0 - 8.0)
-        return 4;
-    if (radius <= 64.0 - 16.0)
-        return 5;
-    return 6;
-    */
-    /*for (let passes = 0; passes < 6; passes++) {
-        if (bestStepRadius(passes, radius) <= 2.5)
-            return passes;
-    }*/
-    if (radius <= 4.0)
-        return 1;
-    if (radius <= 8.0)
-        return 2;
-    if (radius <= 16.0)
-        return 3;
-    if (radius <= 32.0)
-        return 4;
-    if (radius <= 64.0)
-        return 5;
-    return 6;
-}
-
-function bestStepRadius(passes: number, radius: number): number {
-    let n = [1, 5, 21, 85, 341, 1365][passes];
-    return Math.sqrt(n) * radius / n;
-    //return radius / Math.pow(2, passes - 1);
 }
 
 function gauss2D(radius: number, x: number, y: number): number {

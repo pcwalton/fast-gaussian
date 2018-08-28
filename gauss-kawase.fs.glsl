@@ -3,14 +3,17 @@
 precision highp float;
 
 uniform sampler2D uTexture;
-uniform vec2 uSizeRecip;
+uniform vec2 uSrcSizeRecip;
+uniform vec2 uDestSizeRecip;
 uniform vec3 uCoeffsInner;
 uniform vec3 uCoeffsOuter;
 
 varying vec2 vTexCoord;
 
 vec4 sample(vec2 offset, float factor) {
-    return texture2D(uTexture, vTexCoord + uSizeRecip * offset) * factor;
+    //vec2 texCoord = offset * uDestSizeRecip + vTexCoord + 0.5 * (uDestSizeRecip - uSrcSizeRecip);
+    vec2 texCoord = vTexCoord + offset * uDestSizeRecip;
+    return texture2D(uTexture, texCoord) * factor;
 }
 
 vec4 sample4(vec2 offset, float factor) {
@@ -22,6 +25,9 @@ vec4 sample4(vec2 offset, float factor) {
 
 void main() {
     gl_FragColor =
+
+        //sample(vec2(0.5, 0.0), uCoeffsInner.x * 2.0) +
+        //sample(vec2(-0.5, 0.0), uCoeffsInner.x * 2.0) +
 
 // 6x6 kernel:
         sample4(vec2(0.5, 0.5), uCoeffsInner.x) +
