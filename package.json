@@ -4,6 +4,8 @@
     "typescript": "^3.0.1"
   },
   "dependencies": {
+    "@types/webgl2": "0.0.4",
+    "npm": "^6.4.0",
     "parcel-plugin-glsl": "^0.1.0",
     "ssim.js": "^3.0.0"
   }

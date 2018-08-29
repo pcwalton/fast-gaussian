@@ -1,11 +1,13 @@
+#version 300 es
+
 // vertex.vs.glsl
 
 precision highp float;
 
-attribute vec2 aPosition;
-attribute vec2 aTexCoord;
+in vec2 aPosition;
+in vec2 aTexCoord;
 
-varying vec2 vTexCoord;
+out vec2 vTexCoord;
 
 void main() {
     vTexCoord = aTexCoord;

@@ -1,12 +1,16 @@
+#version 300 es
+
 // blit.fs.glsl
 
 precision highp float;
 
 uniform sampler2D uTexture;
 
-varying vec2 vTexCoord;
+in vec2 vTexCoord;
+
+out vec4 oFragColor;
 
 void main() {
-    gl_FragColor = texture2D(uTexture, vTexCoord);
+    oFragColor = texture(uTexture, vTexCoord);
 }
 
