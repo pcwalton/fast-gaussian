@@ -110,7 +110,6 @@ class App {
         // Scheduling
         // FIXME(pcwalton): 1.0 should be 0.0
         const passCount = Math.max(1.0, Math.floor(Math.log2(this.radius)) - 1.0);
-        console.log("passes " + passCount + " radius " + this.radius);
 
         // Downsampling
         let width = this.canvasTest.width, height = this.canvasTest.height;
@@ -119,7 +118,6 @@ class App {
         while (pass < passCount) {
             const scaleFactor = 2.0;
             const newWidth = width / scaleFactor, newHeight = height / scaleFactor;
-            console.log("pass=", pass, "scaleFactor=", scaleFactor);
 
             const renderTarget = this.renderTargets[pass % 2];
             renderTarget.resize(gl, newWidth, newHeight);
@@ -339,9 +337,3 @@ function assert(cond: boolean, message?: string): void {
     if (!cond)
         throw new Error(message != null ? message : "Assertion failed");
 }
-
-type ScheduleEntry = {
-    radius: number;
-    width: number;
-    height: number;
-};
