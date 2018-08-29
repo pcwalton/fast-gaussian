@@ -7,7 +7,7 @@ precision highp float;
 #define SUPPORT 6.0
 
 uniform sampler2D uTexture;
-uniform float uSrcLength;
+uniform vec2 uSrcSize;
 uniform float uCoeff;
 uniform bool uVertical;
 
@@ -16,7 +16,8 @@ in vec2 vTexCoord;
 out vec4 oFragColor;
 
 void main() {
-    float center = (uVertical ? vTexCoord.y : vTexCoord.x) * uSrcLength;
+    float srcLength = uVertical ? uSrcSize.y : uSrcSize.x;
+    float center = (uVertical ? vTexCoord.y : vTexCoord.x) * srcLength;
     float start = floor(center - SUPPORT) + 0.5, end = ceil(center + SUPPORT) - 0.5;
 
     vec4 colorSum = vec4(0.0);
@@ -27,7 +28,7 @@ void main() {
         vec2 factors = exp(uCoeff * offsets * offsets);
 
         float bothFactors = factors.x + factors.y;
-        float xMid = (x + factors.y / bothFactors) / uSrcLength;
+        float xMid = (x + factors.y / bothFactors) / srcLength;
         vec2 texCoord = uVertical ? vec2(vTexCoord.x, xMid) : vec2(xMid, vTexCoord.y);
 
         colorSum += bothFactors * texture(uTexture, texCoord);

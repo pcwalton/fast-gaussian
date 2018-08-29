@@ -5,6 +5,8 @@ import {ssim} from "ssim.js";
 import SHADER_SOURCE_VERTEX from "./vertex.vs.glsl";
 import SHADER_SOURCE_FRAGMENT_BLIT from "./blit.fs.glsl";
 import SHADER_SOURCE_FRAGMENT_BLUR from "./blur.fs.glsl";
+import SHADER_SOURCE_FRAGMENT_DUAL_DOWN from "./dual-down.fs.glsl";
+import SHADER_SOURCE_FRAGMENT_DUAL_UP from "./dual-up.fs.glsl";
 
 import IMAGE_PATH from "./fabio.jpg";
 
@@ -25,11 +27,13 @@ function main(): void {
 
 class App {
     private radius: number;
+    private method: 'gaussian' | 'dual';
 
     private image: HTMLImageElement;
 
     private canvasTest: HTMLCanvasElement;
     private canvasReference: HTMLCanvasElement;
+    private methodSelect: HTMLSelectElement;
     private ssimLabel: HTMLElement;
     private radiusSliderInput: HTMLInputElement;
     private radiusTextInput: HTMLInputElement;
@@ -41,6 +45,8 @@ class App {
     private vertexBuffer: WebGLBuffer;
     private shaderProgramBlit: ShaderProgram;
     private shaderProgramBlur: ShaderProgram;
+    private shaderProgramDualDown: ShaderProgram;
+    private shaderProgramDualUp: ShaderProgram;
     private imageTexture: WebGLTexture;
     private renderTargets: RenderTargetMap;
     private query: WebGLQuery;
@@ -51,14 +57,17 @@ class App {
         this.canvasTest = staticCast(document.getElementById('canvas-test'), HTMLCanvasElement);
         this.canvasReference = staticCast(document.getElementById('canvas-ref'),
                                            HTMLCanvasElement);
+        this.methodSelect = staticCast(document.getElementById('method'), HTMLSelectElement);
         this.ssimLabel = unwrap(document.getElementById('ssim'));
         this.radiusSliderInput = staticCast(document.getElementById('radius-slider'),
                                              HTMLInputElement);
         this.radiusTextInput = staticCast(document.getElementById('radius-text'),
                                            HTMLInputElement);
 
-        this.radius = parseFloat(this.radiusTextInput.value);
+        this.method = this.methodSelect.selectedIndex == 0 ? 'gaussian' : 'dual';
+        this.methodSelect.addEventListener('change', () => this.updateMethod(), false);
 
+        this.radius = parseFloat(this.radiusTextInput.value);
         this.radiusSliderInput.addEventListener('change',
                                                 event => this.updateRadius(event),
                                                 false);
@@ -79,6 +88,12 @@ class App {
 
         this.shaderProgramBlit = new ShaderProgram(gl, SHADER_SOURCE_FRAGMENT_BLIT, vertexBuffer);
         this.shaderProgramBlur = new ShaderProgram(gl, SHADER_SOURCE_FRAGMENT_BLUR, vertexBuffer);
+        this.shaderProgramDualDown = new ShaderProgram(gl,
+                                                       SHADER_SOURCE_FRAGMENT_DUAL_DOWN,
+                                                       vertexBuffer);
+        this.shaderProgramDualUp = new ShaderProgram(gl,
+                                                     SHADER_SOURCE_FRAGMENT_DUAL_UP,
+                                                     vertexBuffer);
 
         const imageTexture = unwrap(gl.createTexture());
         this.imageTexture = imageTexture;
@@ -132,7 +147,10 @@ class App {
             const renderTarget = this.getRenderTarget(newWidth, newHeight);
             gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
 
-            this.drawQuad(this.shaderProgramBlit, newWidth, newHeight, width, srcTexture);
+            let program = this.shaderProgramBlit;
+            if (this.method === 'dual')
+                program = this.shaderProgramDualDown;
+            this.drawQuad(program, newWidth, newHeight, width, height, srcTexture);
 
             srcTexture = renderTarget.texture;
             width = newWidth;
@@ -141,22 +159,14 @@ class App {
             pass++;
         }
 
-        // Horizontal blur
-        const renderTarget = this.getRenderTarget(this.canvasTest.width, height);
-        const radius = this.radius / Math.pow(2.0, passCount);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
-        this.drawBlur(radius, this.canvasTest.width, height, width, false, srcTexture);
-        srcTexture = renderTarget.texture;
-        width = this.canvasTest.width;
-
-        // Vertical blur
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        this.drawBlur(radius,
-                      this.canvasTest.width,
-                      this.canvasTest.height,
-                      height,
-                      true,
-                      srcTexture);
+        switch (this.method) {
+        case 'gaussian':
+            this.drawGaussianBlur(srcTexture, width, height, passCount);
+            break;
+        case 'dual':
+            this.drawDualBlur(srcTexture, width, height, passCount);
+            break;
+        }
 
         // End query.
         gl.endQuery(this.disjointTimerQueryExt.TIME_ELAPSED_EXT);
@@ -168,10 +178,73 @@ class App {
         }, 16);
     }
 
+    private drawGaussianBlur(srcTexture: WebGLTexture,
+                             width: number,
+                             height: number,
+                             passCount: number):
+                             void {
+        const gl = this.gl;
+
+        // Horizontal blur
+        const renderTarget = this.getRenderTarget(this.canvasTest.width, height);
+        const radius = this.radius / Math.pow(2.0, passCount);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
+        this.drawBlur(radius, this.canvasTest.width, height, width, height, false, srcTexture);
+        srcTexture = renderTarget.texture;
+        width = this.canvasTest.width;
+
+        // Vertical blur
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        this.drawBlur(radius,
+                      this.canvasTest.width,
+                      this.canvasTest.height,
+                      width,
+                      height,
+                      true,
+                      srcTexture);
+    }
+
+    private drawDualBlur(srcTexture: WebGLTexture,
+                         width: number,
+                         height: number,
+                         passCount: number):
+                         void {
+        const gl = this.gl;
+
+        let pass = 0;
+        while (pass < passCount) {
+            const scaleFactor = 2.0;
+            const newWidth = width * scaleFactor, newHeight = height * scaleFactor;
+
+            let renderTarget = null;
+            if (pass < passCount - 1)
+                renderTarget = this.getRenderTarget(newWidth, newHeight);
+
+            const framebuffer = renderTarget != null ? renderTarget.framebuffer : null;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+
+            this.drawQuad(this.shaderProgramDualUp,
+                          newWidth,
+                          newHeight,
+                          width,
+                          height,
+                          srcTexture);
+
+            if (renderTarget != null)
+                srcTexture = renderTarget.texture;
+
+            width = newWidth;
+            height = newHeight;
+
+            pass++;
+        }
+    }
+
     private drawBlur(radius: number,
                      destWidth: number,
                      destHeight: number,
-                     srcLength: number,
+                     srcWidth: number,
+                     srcHeight: number,
                      vertical: boolean,
                      srcTexture: WebGLTexture):
                      void {
@@ -186,13 +259,14 @@ class App {
         gl.uniform1f(shaderProgram.uniformCoeff, coeff);
         gl.uniform1i(shaderProgram.uniformVertical, vertical ? 1 : 0);
 
-        this.drawQuad(shaderProgram, destWidth, destHeight, srcLength, srcTexture);
+        this.drawQuad(shaderProgram, destWidth, destHeight, srcWidth, srcHeight, srcTexture);
     }
 
     private drawQuad(shaderProgram: ShaderProgram,
                      destWidth: number,
                      destHeight: number,
-                     srcLength: number,
+                     srcWidth: number,
+                     srcHeight: number,
                      srcTexture: WebGLTexture):
                      void {
         const gl = this.gl;
@@ -206,7 +280,7 @@ class App {
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, srcTexture);
         gl.uniform1i(shaderProgram.uniformTexture, 0);
-        gl.uniform1f(shaderProgram.uniformSrcLength, srcLength);
+        gl.uniform2f(shaderProgram.uniformSrcSize, srcWidth, srcHeight);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
@@ -244,6 +318,11 @@ class App {
         const renderTarget = new RenderTarget(this.gl, width, height);
         this.renderTargets[key] = renderTarget;
         return renderTarget;
+    }
+
+    private updateMethod(): void {
+        this.method = this.methodSelect.selectedIndex == 0 ? 'gaussian' : 'dual';
+        this.update();
     }
 }
 
@@ -289,7 +368,7 @@ class ShaderProgram {
     program: WebGLProgram;
     vertexArrayObject: WebGLVertexArrayObject;
     uniformTexture: WebGLUniformLocation;
-    uniformSrcLength: WebGLUniformLocation | null;
+    uniformSrcSize: WebGLUniformLocation | null;
     uniformCoeff: WebGLUniformLocation | null;
     uniformVertical: WebGLUniformLocation | null;
 
@@ -312,7 +391,7 @@ class ShaderProgram {
         const attribVertexPosition = gl.getAttribLocation(program, "aPosition");
         const attribTexCoord = gl.getAttribLocation(program, "aTexCoord");
         this.uniformTexture = unwrap(gl.getUniformLocation(program, "uTexture"));
-        this.uniformSrcLength = gl.getUniformLocation(program, "uSrcLength");
+        this.uniformSrcSize = gl.getUniformLocation(program, "uSrcSize");
         this.uniformCoeff = gl.getUniformLocation(program, "uCoeff");
         this.uniformVertical = gl.getUniformLocation(program, "uVertical");
 
