@@ -35,13 +35,15 @@ class App {
     private radiusTextInput: HTMLInputElement;
 
     private gl: WebGL2RenderingContext;
+    private disjointTimerQueryExt: any | null;
     private context2D: CanvasRenderingContext2D;
 
     private vertexBuffer: WebGLBuffer;
     private shaderProgramBlit: ShaderProgram;
     private shaderProgramBlur: ShaderProgram;
     private imageTexture: WebGLTexture;
-    private renderTargets: RenderTarget[];
+    private renderTargets: RenderTargetMap;
+    private query: WebGLQuery;
 
     constructor(image: HTMLImageElement) {
         this.image = image;
@@ -67,6 +69,7 @@ class App {
 
         const gl = unwrap(this.canvasTest.getContext('webgl2', {antialias: false}));
         this.gl = gl;
+        this.disjointTimerQueryExt = gl.getExtension('EXT_disjoint_timer_query');
         this.context2D = unwrap(this.canvasReference.getContext('2d'));
 
         const vertexBuffer = unwrap(gl.createBuffer());
@@ -88,7 +91,9 @@ class App {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-        this.renderTargets = [new RenderTarget(gl), new RenderTarget(gl)];
+        this.renderTargets = {};
+
+        this.query = unwrap(gl.createQuery());
     }
 
     update(): void {
@@ -111,6 +116,11 @@ class App {
         // FIXME(pcwalton): 1.0 should be 0.0
         const passCount = Math.max(1.0, Math.floor(Math.log2(this.radius)) - 1.0);
 
+        // Start query.
+        if (this.disjointTimerQueryExt != null) {
+            gl.beginQuery(this.disjointTimerQueryExt.TIME_ELAPSED_EXT, this.query);
+        }
+
         // Downsampling
         let width = this.canvasTest.width, height = this.canvasTest.height;
         let srcTexture = this.imageTexture;
@@ -119,16 +129,10 @@ class App {
             const scaleFactor = 2.0;
             const newWidth = width / scaleFactor, newHeight = height / scaleFactor;
 
-            const renderTarget = this.renderTargets[pass % 2];
-            renderTarget.resize(gl, newWidth, newHeight);
+            const renderTarget = this.getRenderTarget(newWidth, newHeight);
             gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
 
-            this.drawQuad(gl,
-                          this.shaderProgramBlit,
-                          newWidth,
-                          newHeight,
-                          width,
-                          srcTexture);
+            this.drawQuad(this.shaderProgramBlit, newWidth, newHeight, width, srcTexture);
 
             srcTexture = renderTarget.texture;
             width = newWidth;
@@ -138,34 +142,40 @@ class App {
         }
 
         // Horizontal blur
-        const renderTarget = this.renderTargets[pass % 2];
+        const renderTarget = this.getRenderTarget(this.canvasTest.width, height);
         const radius = this.radius / Math.pow(2.0, passCount);
-        renderTarget.resize(gl, this.canvasTest.width, height);
         gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
-        this.drawBlur(gl, radius, this.canvasTest.width, height, width, false, srcTexture);
+        this.drawBlur(radius, this.canvasTest.width, height, width, false, srcTexture);
         srcTexture = renderTarget.texture;
         width = this.canvasTest.width;
 
         // Vertical blur
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        this.drawBlur(gl,
-                      radius,
+        this.drawBlur(radius,
                       this.canvasTest.width,
                       this.canvasTest.height,
                       height,
                       true,
                       srcTexture);
+
+        // End query.
+        gl.endQuery(this.disjointTimerQueryExt.TIME_ELAPSED_EXT);
+        setTimeout(() => {
+            if (this.disjointTimerQueryExt != null) {
+                const timeElapsed = this.disjointTimerQueryExt.getQueryObjectEXT(this.query, this.disjointTimerQueryExt.QUERY_RESULT_EXT) / 1000000.0;
+                console.log(timeElapsed + " ms elapsed");
+            }
+        }, 16);
     }
 
-    private drawBlur(gl: WebGL2RenderingContext,
-                     radius: number,
+    private drawBlur(radius: number,
                      destWidth: number,
                      destHeight: number,
                      srcLength: number,
                      vertical: boolean,
                      srcTexture: WebGLTexture):
                      void {
-        console.log("drawBlur(", radius, destWidth, destHeight, srcLength, ")");
+        const gl = this.gl;
 
         const sigma = radius * 0.5;
         const coeff = -1.0 / (2.0 * sigma * sigma);
@@ -175,16 +185,18 @@ class App {
         gl.useProgram(shaderProgram.program);
         gl.uniform1f(shaderProgram.uniformCoeff, coeff);
         gl.uniform1i(shaderProgram.uniformVertical, vertical ? 1 : 0);
-        this.drawQuad(gl, shaderProgram, destWidth, destHeight, srcLength, srcTexture);
+
+        this.drawQuad(shaderProgram, destWidth, destHeight, srcLength, srcTexture);
     }
 
-    private drawQuad(gl: WebGL2RenderingContext,
-                     shaderProgram: ShaderProgram,
+    private drawQuad(shaderProgram: ShaderProgram,
                      destWidth: number,
                      destHeight: number,
                      srcLength: number,
                      srcTexture: WebGLTexture):
                      void {
+        const gl = this.gl;
+
         gl.bindVertexArray(shaderProgram.vertexArrayObject);
         gl.useProgram(shaderProgram.program);
         gl.viewport(0, 0, destWidth, destHeight);
@@ -224,19 +236,30 @@ class App {
             });
         })
     }
+
+    private getRenderTarget(width: number, height: number): RenderTarget {
+        const key = width + "x" + height;
+        if (key in this.renderTargets)
+            return this.renderTargets[key];
+        const renderTarget = new RenderTarget(this.gl, width, height);
+        this.renderTargets[key] = renderTarget;
+        return renderTarget;
+    }
 }
+
+type RenderTargetMap = {[key: string]: RenderTarget};
 
 class RenderTarget {
     framebuffer: WebGLFramebuffer;
     texture: WebGLTexture;
 
-    constructor(gl: WebGLRenderingContext) {
+    constructor(gl: WebGLRenderingContext, width: number, height: number) {
         this.texture = unwrap(gl.createTexture());
         this.framebuffer = unwrap(gl.createFramebuffer());
-        this.resize(gl, 1, 1);
+        this.resize(gl, width, height);
     }
 
-    resize(gl: WebGLRenderingContext, width: number, height: number): void {
+    private resize(gl: WebGLRenderingContext, width: number, height: number): void {
         gl.bindTexture(gl.TEXTURE_2D, this.texture);
         gl.texImage2D(gl.TEXTURE_2D,
                       0,
