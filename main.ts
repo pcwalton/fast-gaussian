@@ -109,108 +109,95 @@ class App {
     private updateTest(): void {
         const gl = this.gl;
 
-        //let passCount = bestPassCount(this.radius);
-        /*const runTestPass = passCount > 3;
-        if (runTestPass) {
-            console.log("*** 4 passes");
+        // Scheduling
+        let passCount = 0/*, finalScaleFactor = 0*/;
+        if (this.radius < 2.0) {
+            // TODO(pcwalton)
+            passCount = 1;
+            //finalScaleFactor = 1.0;
+        } else if (this.radius < 4.0) {
+            passCount = 2;
+        } else if (this.radius < 9.0) {
             passCount = 3;
-        }*/
+            //finalScaleFactor = 0.25 * Math.sqrt((this.radius - 4.0) * (this.radius + 4.0));
+        } else if (this.radius < 18.0) {
+            passCount = 4;
+            //finalScaleFactor = Math.sqrt(this.radius * this.radius - 80.0) / 8.0;
+        } else if (this.radius < 37.0) {
+            passCount = 5;
+            //finalScaleFactor = Math.sqrt(this.radius * this.radius - 336.0) / 16.0;
+        } else if (this.radius < 74.0) {
+            passCount = 6;
+            /*finalScaleFactor =
+                Math.sqrt(this.radius / 4096.0 - 21.0 / 16.0 - Math.sqrt(5.0) / 1024.0);*/
+        } else if (this.radius < 148.0) {
+            passCount = 7;
+            /*finalScaleFactor =
+                Math.sqrt(this.radius / 16384.0 - 85.0 / 64.0 - Math.sqrt(5.0) - 4096.0);*/
+        } else {
+            passCount = 8;
+            /*finalScaleFactor =
+                Math.sqrt(this.radius / 65536.0 - 341.0 / 256.0 - Math.sqrt(5.0) / 16384.0);*/
+        }
+        console.log("passes " + passCount + " radius " + this.radius);
 
         // Downsampling
-        let radiusLeft = this.radius;
-        let totalRadius = 0.0, totalScale = 1.0;
-        let schedule: ScheduleEntry[] = [];
-
-        //const targetWidth = this.canvasTest.width / this.radius * 2;
         let width = this.canvasTest.width, height = this.canvasTest.height;
         let srcTexture = this.imageTexture;
         let pass = 0;
-        while (radiusLeft > 0.001) {
-            // sqrt((stepRadius*scaleFactor*totalScale)^2) == radiusLeft
-            // stepRadius*scaleFactor*totalScale == radiusLeft
-            let stepRadius = 2.0;
-            let scaleFactor = Math.min(radiusLeft / (totalScale * stepRadius), 2.0);
-            /*if (scaleFactor < 1.0) {
-                // Hold scale factor constant; adjust radius.
-                scaleFactor = 1.0;
-                stepRadius = radiusLeft / (scaleFactor * totalScale);
-            }*/
-
-            const scheduleEntry = {
-                radius: stepRadius,
-                width: Math.round(width / scaleFactor),
-                height: Math.round(height / scaleFactor),
-            };
-            schedule.push(scheduleEntry);
+        while (pass < passCount) {
+            //const scaleFactor = pass < passCount - 1 ? 2.0 : finalScaleFactor;
+            const scaleFactor = 2.0;
+            const newWidth = width / scaleFactor, newHeight = height / scaleFactor;
+            console.log("pass=", pass, "scaleFactor=", scaleFactor);
 
             const renderTarget = this.renderTargets[pass % 2];
-            renderTarget.resize(gl, scheduleEntry.width, scheduleEntry.height);
+            renderTarget.resize(gl, newWidth, newHeight);
             gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
-
-            totalScale *= scaleFactor;
-            totalRadius += scheduleEntry.radius * totalScale;
-            radiusLeft -= scheduleEntry.radius * totalScale;
-            console.log("... pass=", pass, "scheduleEntry=", scheduleEntry,
-                        "radiusLeft=", radiusLeft, "scaleFactor=", scaleFactor);
 
             this.drawQuad(gl,
                           this.shaderProgramBlit,
-                          scheduleEntry.width,
-                          scheduleEntry.height,
+                          newWidth,
+                          newHeight,
                           width,
                           height,
                           srcTexture);
 
             srcTexture = renderTarget.texture;
-            width = scheduleEntry.width;
-            height = scheduleEntry.height;
+            width = newWidth;
+            height = newHeight;
 
             pass++;
         }
-
-        const passCount = pass;
-
-        //schedule.reverse();
-
-        console.log("passes " + passCount + " radius " + this.radius);
 
         // Intermediate upsampling passes
         const penultPass = pass + passCount - 1;
         while (pass < penultPass) {
-            const scheduleEntry = unwrap(schedule.pop());
-            const nextScheduleEntry = schedule[schedule.length - 1];
+            const scaleFactor = 2.0;
+            const newWidth = width * scaleFactor, newHeight = height * scaleFactor;
 
             const renderTarget = this.renderTargets[pass % 2];
-            renderTarget.resize(gl, nextScheduleEntry.width, nextScheduleEntry.height);
-            console.log("upsample: scheduleEntry=", scheduleEntry, "nextScheduleEntry=",
-                        nextScheduleEntry);
+            renderTarget.resize(gl, newWidth, newHeight);
+            console.log("upsample: newWidth=", newWidth, "newHeight=", newHeight);
             gl.bindFramebuffer(gl.FRAMEBUFFER, renderTarget.framebuffer);
 
-            this.drawBlur(gl,
-                          scheduleEntry.radius,
-                          nextScheduleEntry.width,
-                          nextScheduleEntry.height,
-                          scheduleEntry.width,
-                          scheduleEntry.height,
-                          srcTexture);
+            this.drawBlur(gl, 2.0, newWidth, newHeight, width, height, srcTexture);
 
             srcTexture = renderTarget.texture;
+            width = newWidth;
+            height = newHeight;
 
             pass++;
         }
 
-        const scheduleEntry = unwrap(schedule.pop());
-        console.log("upsample (final): scheduleEntry=", scheduleEntry);
-        console.log("... totalRadius=", Math.sqrt(totalRadius));
-
         // Final upsampling pass
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         this.drawBlur(gl,
-                      scheduleEntry.radius,
+                      2.0/*this.shaderProgramBlit*/,
                       this.canvasTest.width,
                       this.canvasTest.height,
-                      scheduleEntry.width,
-                      scheduleEntry.height,
+                      width,
+                      height,
                       srcTexture);
     }
 
@@ -223,28 +210,37 @@ class App {
                      srcTexture: WebGLTexture):
                      void {
         console.log("drawBlur(", radius, destWidth, destHeight, srcWidth, srcHeight, ")");
-        // TODO(pcwalton): This assumes 2x upsampling/downsampling...
         const coeffs = [
-            gauss2D(radius, 0.5, 0.5),
-            gauss2D(radius, 0.5, 1.5),
-            gauss2D(radius, 1.5, 1.5),
-            gauss2D(radius, 2.5, 0.5),
-            gauss2D(radius, 2.5, 1.5),
-            gauss2D(radius, 2.5, 2.5),
+            gauss2D(radius,  0.0,  0.0),    // 0
+            gauss2D(radius,  1.0,  0.0),    // 1
+            gauss2D(radius,  2.0,  0.0),    // 2
+            gauss2D(radius,  0.0,  1.0),    // 3
+            gauss2D(radius,  1.0,  1.0),    // 4
+            gauss2D(radius,  2.0,  1.0),    // 5
+            gauss2D(radius,  0.0,  2.0),    // 6
+            gauss2D(radius,  1.0,  2.0),    // 7
+            gauss2D(radius,  2.0,  2.0),    // 8
         ];
 
-        const coeffSum = 4.0 * (coeffs[0] + 2.0 * coeffs[1] + coeffs[2] +
-                                2.0 * coeffs[3] + 2.0 * coeffs[4] + coeffs[5]);
-        const coeffsInner = coeffs.slice(0, 3).map(x => x / coeffSum);
-        const coeffsOuter = coeffs.slice(3, 6).map(x => x / coeffSum);
-        //console.log("coeffsInner", coeffsInner);
-        //console.log("coeffsOuter", coeffsOuter);
+        const coeffSum =
+            coeffs[0] +
+            2.0 * (coeffs[1] + coeffs[2]) +
+            2.0 * (coeffs[3] + coeffs[6]) +
+            4.0 * (coeffs[4] + coeffs[5] + coeffs[7] + coeffs[8]);
+
+        for (let i = 0; i < coeffs.length; i++)
+            coeffs[i] /= coeffSum;
+
+        const coeffRow0 = [coeffs[0], coeffs[1], coeffs[2]];
+        const coeffRow1 = [coeffs[3], coeffs[4], coeffs[5]];
+        const coeffRow2 = [coeffs[6], coeffs[7], coeffs[8]];
 
         const shaderProgram = this.shaderProgramGaussKawase;
         //const shaderProgram = this.shaderProgramBlit;
         gl.useProgram(shaderProgram.program);
-        gl.uniform3fv(shaderProgram.uniformCoeffsInner, coeffsInner);
-        gl.uniform3fv(shaderProgram.uniformCoeffsOuter, coeffsOuter);
+        gl.uniform3fv(shaderProgram.uniformCoeffRow0, coeffRow0);
+        gl.uniform3fv(shaderProgram.uniformCoeffRow1, coeffRow1);
+        gl.uniform3fv(shaderProgram.uniformCoeffRow2, coeffRow2);
         this.drawQuad(gl, shaderProgram, destWidth, destHeight, srcWidth, srcHeight, srcTexture);
     }
 
@@ -338,8 +334,9 @@ class ShaderProgram {
     uniformTexture: WebGLUniformLocation;
     uniformDestSizeRecip: WebGLUniformLocation | null;
     uniformSrcSizeRecip: WebGLUniformLocation | null;
-    uniformCoeffsInner: WebGLUniformLocation | null;
-    uniformCoeffsOuter: WebGLUniformLocation | null;
+    uniformCoeffRow0: WebGLUniformLocation | null;
+    uniformCoeffRow1: WebGLUniformLocation | null;
+    uniformCoeffRow2: WebGLUniformLocation | null;
 
     constructor(gl: WebGLRenderingContext, fragmentShader: string, buffer: WebGLBuffer) {
         const shaderVertex = createShader(gl, 'vertex', SHADER_SOURCE_VERTEX);
@@ -359,8 +356,9 @@ class ShaderProgram {
         this.uniformTexture = unwrap(gl.getUniformLocation(program, "uTexture"));
         this.uniformDestSizeRecip = gl.getUniformLocation(program, "uDestSizeRecip");
         this.uniformSrcSizeRecip = gl.getUniformLocation(program, "uSrcSizeRecip");
-        this.uniformCoeffsInner = gl.getUniformLocation(program, "uCoeffsInner");
-        this.uniformCoeffsOuter = gl.getUniformLocation(program, "uCoeffsOuter");
+        this.uniformCoeffRow0 = gl.getUniformLocation(program, "uCoeffRow0");
+        this.uniformCoeffRow1 = gl.getUniformLocation(program, "uCoeffRow1");
+        this.uniformCoeffRow2 = gl.getUniformLocation(program, "uCoeffRow2");
 
         gl.vertexAttribPointer(attribVertexPosition, 2, gl.BYTE, false, 4, 0);
         gl.vertexAttribPointer(attribTexCoord, 2, gl.BYTE, false, 4, 2);

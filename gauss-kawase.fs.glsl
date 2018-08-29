@@ -5,15 +5,23 @@ precision highp float;
 uniform sampler2D uTexture;
 uniform vec2 uSrcSizeRecip;
 uniform vec2 uDestSizeRecip;
-uniform vec3 uCoeffsInner;
-uniform vec3 uCoeffsOuter;
+uniform vec3 uCoeffRow0;
+uniform vec3 uCoeffRow1;
+uniform vec3 uCoeffRow2;
 
 varying vec2 vTexCoord;
 
 vec4 sample(vec2 offset, float factor) {
-    //vec2 texCoord = offset * uDestSizeRecip + vTexCoord + 0.5 * (uDestSizeRecip - uSrcSizeRecip);
-    vec2 texCoord = vTexCoord + offset * uDestSizeRecip;
+    vec2 texCoord = vTexCoord + offset * uSrcSizeRecip;
     return texture2D(uTexture, texCoord) * factor;
+}
+
+vec4 sample2X(vec2 offset, float factor) {
+    return sample(offset, factor) + sample(vec2(-offset.x, offset.y), factor);
+}
+
+vec4 sample2Y(vec2 offset, float factor) {
+    return sample(offset, factor) + sample(vec2(offset.x, -offset.y), factor);
 }
 
 vec4 sample4(vec2 offset, float factor) {
@@ -26,19 +34,28 @@ vec4 sample4(vec2 offset, float factor) {
 void main() {
     gl_FragColor =
 
-        //sample(vec2(0.5, 0.0), uCoeffsInner.x * 2.0) +
-        //sample(vec2(-0.5, 0.0), uCoeffsInner.x * 2.0) +
+#if 0
+        (sample4(vec2(1.0, 1.0), 1.0)) / 4.0;
+#endif
+
+        // Box blur-ish
+#if 0
+        (sample4(vec2(1.0, 1.0), 1.0) +
+         sample(vec2(0.0, 1.0), 1.0) + sample(vec2(1.0, 0.0), 1.0) +
+         sample(vec2(0.0, -1.0), 1.0) + sample(vec2(-1.0, 0.0), 1.0) +
+         sample(vec2(0.0, 0.0), 1.0)) / 9.0;
+#endif
 
 // 6x6 kernel:
-        sample4(vec2(0.5, 0.5), uCoeffsInner.x) +
-        sample4(vec2(1.5, 0.5), uCoeffsInner.y) +
-        sample4(vec2(0.5, 1.5), uCoeffsInner.y) +
-        sample4(vec2(1.5, 1.5), uCoeffsInner.z) +
-        sample4(vec2(0.5, 2.5), uCoeffsOuter.x) +
-        sample4(vec2(2.5, 0.5), uCoeffsOuter.x) +
-        sample4(vec2(2.5, 1.5), uCoeffsOuter.y) +
-        sample4(vec2(1.5, 2.5), uCoeffsOuter.y) +
-        sample4(vec2(2.5, 2.5), uCoeffsOuter.z);
+        sample  (vec2(0.0, 0.0), uCoeffRow0.x) +
+        sample2X(vec2(1.0, 0.0), uCoeffRow0.y) +
+        sample2X(vec2(2.0, 0.0), uCoeffRow0.z) +
+        sample2Y(vec2(0.0, 1.0), uCoeffRow1.x) +
+        sample4 (vec2(1.0, 1.0), uCoeffRow1.y) +
+        sample4 (vec2(2.0, 1.0), uCoeffRow1.z) +
+        sample2Y(vec2(0.0, 2.0), uCoeffRow2.x) +
+        sample4 (vec2(1.0, 2.0), uCoeffRow2.y) +
+        sample4 (vec2(2.0, 2.0), uCoeffRow2.z);
 
 #if 0
 // 6x6 kernel, 1.5px:
