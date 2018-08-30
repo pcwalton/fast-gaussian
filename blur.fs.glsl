@@ -41,10 +41,7 @@ void main() {
     float start = floor(center - SUPPORT) + 0.5, end = ceil(center + SUPPORT) - 0.5;
 
     float offset = start - center;
-    vec3 g;
-    g.x = exp(uCoeff * offset * offset);
-    g.y = exp(2.0 * uCoeff * offset) * exp(uCoeff);
-    g.z = exp(2.0 * uCoeff);
+    vec3 g = exp(uCoeff * vec3(offset * offset, 2.0 * offset + 1.0, 2.0));
 
     vec4 colorSum = vec4(0.0);
     float factorSum = 0.0;

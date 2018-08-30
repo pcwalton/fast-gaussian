@@ -35,6 +35,7 @@ class App {
     private canvasReference: HTMLCanvasElement;
     private methodSelect: HTMLSelectElement;
     private ssimLabel: HTMLElement;
+    private timeLabel: HTMLElement;
     private radiusSliderInput: HTMLInputElement;
     private radiusTextInput: HTMLInputElement;
 
@@ -59,6 +60,7 @@ class App {
                                            HTMLCanvasElement);
         this.methodSelect = staticCast(document.getElementById('method'), HTMLSelectElement);
         this.ssimLabel = unwrap(document.getElementById('ssim'));
+        this.timeLabel = unwrap(document.getElementById('time'));
         this.radiusSliderInput = staticCast(document.getElementById('radius-slider'),
                                              HTMLInputElement);
         this.radiusTextInput = staticCast(document.getElementById('radius-text'),
@@ -66,6 +68,9 @@ class App {
 
         this.method = this.methodSelect.selectedIndex == 0 ? 'gaussian' : 'dual';
         this.methodSelect.addEventListener('change', () => this.updateMethod(), false);
+
+        const redrawButton = unwrap(document.getElementById('redraw'));
+        redrawButton.addEventListener('click', () => this.update(), false);
 
         this.radius = parseFloat(this.radiusTextInput.value);
         this.radiusSliderInput.addEventListener('change',
@@ -172,8 +177,11 @@ class App {
         gl.endQuery(this.disjointTimerQueryExt.TIME_ELAPSED_EXT);
         setTimeout(() => {
             if (this.disjointTimerQueryExt != null) {
-                const timeElapsed = this.disjointTimerQueryExt.getQueryObjectEXT(this.query, this.disjointTimerQueryExt.QUERY_RESULT_EXT) / 1000000.0;
-                console.log(timeElapsed + " ms elapsed");
+                const timeElapsed = this.disjointTimerQueryExt
+                                        .getQueryObjectEXT(this.query,
+                                                           this.disjointTimerQueryExt
+                                                               .QUERY_RESULT_EXT) / 1000000.0;
+                this.timeLabel.textContent = "" + timeElapsed;
             }
         }, 16);
     }
