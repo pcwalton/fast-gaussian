@@ -15,31 +15,45 @@ in vec2 vTexCoord;
 
 out vec4 oFragColor;
 
-void accum(float x, float center, float srcLength, inout vec4 colorSum, inout float factorSum) {
-    vec2 offsets = vec2(0.0, 1.0) + x - center;
-    vec2 factors = exp(uCoeff * offsets * offsets);
+void accum(float x,
+           float srcLengthRecip,
+           inout vec3 g,
+           inout vec4 colorSum,
+           inout float factorSum) {
+    float factorA = g.x;
+    g.xy *= g.yz;
+    float factorB = g.x;
+    g.xy *= g.yz;
 
-    float bothFactors = factors.x + factors.y;
-    float xMid = (x + factors.y / bothFactors) / srcLength;
+    float factors = factorA + factorB;
+    float xMid = (x + factorB / factors) * srcLengthRecip;
     vec2 texCoord = uVertical ? vec2(vTexCoord.x, xMid) : vec2(xMid, vTexCoord.y);
 
-    colorSum += bothFactors * texture(uTexture, texCoord);
-    factorSum += bothFactors;
+    colorSum += factors * texture(uTexture, texCoord);
+    factorSum += factors;
 }
 
 void main() {
     float srcLength = uVertical ? uSrcSize.y : uSrcSize.x;
+    float srcLengthRecip = 1.0 / srcLength;
+
     float center = (uVertical ? vTexCoord.y : vTexCoord.x) * srcLength;
     float start = floor(center - SUPPORT) + 0.5, end = ceil(center + SUPPORT) - 0.5;
+
+    float offset = start - center;
+    vec3 g;
+    g.x = exp(uCoeff * offset * offset);
+    g.y = exp(2.0 * uCoeff * offset) * exp(uCoeff);
+    g.z = exp(2.0 * uCoeff);
 
     vec4 colorSum = vec4(0.0);
     float factorSum = 0.0;
 
-    accum(start,        center, srcLength, colorSum, factorSum);
-    accum(start +  2.0, center, srcLength, colorSum, factorSum);
-    accum(start +  4.0, center, srcLength, colorSum, factorSum);
-    accum(start +  6.0, center, srcLength, colorSum, factorSum);
-    accum(start +  8.0, center, srcLength, colorSum, factorSum);
+    accum(start,        srcLengthRecip, g, colorSum, factorSum);
+    accum(start + 2.0,  srcLengthRecip, g, colorSum, factorSum);
+    accum(start + 4.0,  srcLengthRecip, g, colorSum, factorSum);
+    accum(start + 6.0,  srcLengthRecip, g, colorSum, factorSum);
+    accum(start + 8.0,  srcLengthRecip, g, colorSum, factorSum);
 
     oFragColor = colorSum / factorSum;
 }
